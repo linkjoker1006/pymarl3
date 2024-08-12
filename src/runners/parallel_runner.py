@@ -44,6 +44,7 @@ class ParallelRunner:
         self.test_returns = []
         self.train_stats = {}
         self.test_stats = {}
+        self.last_test_stats = {}
 
         self.log_train_stats_t = -100000
 
@@ -184,12 +185,12 @@ class ParallelRunner:
             # Add post_transiton data into the batch
             self.batch.update(post_transition_data, bs=envs_not_terminated, ts=self.t, mark_filled=False)
 
-            if self.args.evaluate:
-                assert self.batch_size == 1
-                move = [["北", "南", "东", "西"][action - 2] if action > 1 and action < 6 else "action-{}".format(action)
-                        for action in cpu_actions[0]]
-                print(self.t, move, post_transition_data["reward"])
-                time.sleep(1)
+            # if self.args.evaluate:
+            #     assert self.batch_size == 1
+            #     move = [["北", "南", "东", "西"][action - 2] if action > 1 and action < 6 else "action-{}".format(action)
+            #             for action in cpu_actions[0]]
+            #     print(self.t, move, post_transition_data["reward"])
+            #     time.sleep(1)
 
             # Move onto the next timestep
             self.t += 1
@@ -226,6 +227,17 @@ class ParallelRunner:
 
         cur_returns.extend(episode_returns)
 
+        # test with chunksize
+        # chunksize = 32
+        # if cur_stats['n_episodes'] % chunksize == 0:
+        #     print(len(self.test_returns))
+        #     if cur_stats['n_episodes'] / chunksize == 1:
+        #         print("test_battle_won: {}".format(cur_stats['battle_won'] / chunksize))
+        #         self.last_test_stats = copy.deepcopy(cur_stats)
+        #     else:
+        #         print("test_battle_won: {}".format((cur_stats['battle_won'] - self.last_test_stats['battle_won']) / chunksize))
+        #         self.last_test_stats = copy.deepcopy(cur_stats)
+
         n_test_runs = max(1, self.args.test_nepisode // self.batch_size) * self.batch_size
         if test_mode and (len(self.test_returns) == n_test_runs):
             self._log(cur_returns, cur_stats, log_prefix)
@@ -238,6 +250,14 @@ class ParallelRunner:
         return self.batch
         # return clear_no_reward_sub_trajectory(self.batch)
 
+    def save_replay(self):
+        print("----------------------------Replay----------------------------")
+        if self.args.save_replay:
+            for parent_conn in self.parent_conns:
+                parent_conn.send(("save_replay", None))
+            for parent_conn in self.parent_conns:
+                _ = parent_conn.recv()
+
     def _log(self, returns, stats, prefix):
         self.logger.log_stat(prefix + "return_min", np.min(returns), self.t_env)
         self.logger.log_stat(prefix + "return_max", np.max(returns), self.t_env)
@@ -249,6 +269,7 @@ class ParallelRunner:
             if k != "n_episodes":
                 self.logger.log_stat(prefix + k + "_mean", v / stats["n_episodes"], self.t_env)
         stats.clear()
+        print(self.logger.stats)
 
 
 def env_worker(remote, env_fn):
@@ -289,6 +310,8 @@ def env_worker(remote, env_fn):
             remote.send(env.get_env_info())
         elif cmd == "get_stats":
             remote.send(env.get_stats())
+        elif cmd == "save_replay":
+            remote.send(env.save_replay())
         else:
             raise NotImplementedError
 
