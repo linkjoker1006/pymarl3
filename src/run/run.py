@@ -27,7 +27,6 @@ def run(_run, _config, _log):
     # th.set_num_interop_threads(8)
 
     args.device = "cuda" if args.use_cuda else "cpu"
-
     # setup loggers
     logger = Logger(_log)
 
@@ -41,10 +40,12 @@ def run(_run, _config, _log):
     unique_token = "{}__{}".format(args.name, datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
     args.unique_token = unique_token
 
-    testing_algorithms = ["vdn", "qmix", "hpn_vdn", "hpn_qmix",
+    testing_algorithms = ["hpn_qgroupmix", "hpn_qgroupmix_atten", "hpn_qghypermix", "hpn_qgattenmix",
+                          "vdn", "qmix", "hpn_vdn", "hpn_qmix",
                           "deepset_vdn", "deepset_qmix", "deepset_hyper_vdn", "deepset_hyper_qmix",
                           "updet_vdn", "updet_qmix", "vdn_DA", "qmix_DA",
-                          "gnn_vdn", "gnn_qmix", "qplex", "hpn_qplex", "asn"
+                          "gnn_vdn", "gnn_qmix", "qplex", "hpn_qplex", "asn",
+                          "ippo", "mappo"
                           ]
     env_name = args.env
     logdir = env_name
@@ -68,48 +69,64 @@ def run(_run, _config, _log):
     if args.name in testing_algorithms:
         if args.name in ["vdn_DA", "qmix_DA", ]:
             logdir = os.path.join(logdir,
-                                  "{}-data_augment={}".format(
-                                      args.mixer, args.augment_times
+                                  "{}-data_augment={}-tdlambda={}".format(
+                                      args.mixer,
+                                      args.augment_times,
+                                      args.td_lambda,
                                   ))
         elif args.name in ["gnn_vdn", "gnn_qmix"]:
             logdir = os.path.join(logdir,
-                                  "{}-layer_num={}".format(
-                                      args.mixer, args.gnn_layer_num
+                                  "{}-layer_num={}-tdlambda={}".format(
+                                      args.mixer,
+                                      args.gnn_layer_num,
+                                      args.td_lambda,
                                   ))
         elif args.name in ["vdn", "qmix", "deepset_vdn", "deepset_qmix", "qplex", "asn"]:
             logdir = os.path.join(logdir,
-                                  "mixer={}".format(
+                                  "mixer={}-tdlambda={}".format(
                                       args.mixer,
+                                      args.td_lambda,
                                   ))
         elif args.name in ["updet_vdn", "updet_qmix"]:
             logdir = os.path.join(logdir,
-                                  "mixer={}-att_dim={}-att_head={}-att_layer={}".format(
+                                  "mixer={}-att_dim={}-att_head={}-att_layer={}-tdlambda={}".format(
                                       args.mixer,
                                       args.transformer_embed_dim,
                                       args.transformer_heads,
                                       args.transformer_depth,
+                                      args.td_lambda,
                                   ))
         elif args.name in ["deepset_hyper_vdn", "deepset_hyper_qmix"]:
             logdir = os.path.join(logdir,
-                                  "mixer={}-hpn_hyperdim={}".format(
+                                  "mixer={}-hpn_hyperdim={}-tdlambda={}".format(
                                       args.mixer,
                                       args.hpn_hyper_dim,
+                                      args.td_lambda,
                                   ))
         elif args.name in ["hpn_vdn", "hpn_qmix", "hpn_qplex"]:
             logdir = os.path.join(logdir,
-                                  "head_n={}-mixer={}-hpn_hyperdim={}-acti={}".format(
+                                  "head_n={}-mixer={}-hpn_hyperdim={}-acti={}-tdlambda={}".format(
                                       args.hpn_head_num,
                                       args.mixer,
                                       args.hpn_hyper_dim,
                                       args.hpn_hyper_activation,
+                                      args.td_lambda,
+                                  ))
+        elif args.name in ["hpn_qgroupmix", "hpn_qgroupmix_atten", "hpn_qghypermix", "hpn_qgattenmix"]:
+            logdir = os.path.join(logdir,
+                                  "head_n={}-mixer={}-hpn_hyperdim={}-acti={}-tdlambda={}".format(
+                                      args.hpn_head_num,
+                                      args.mixer,
+                                      args.hpn_hyper_dim,
+                                      args.hpn_hyper_activation,
+                                      args.td_lambda,
                                   ))
 
     logdir = os.path.join(logdir,
-                          "rnn_dim={}-2bs={}_{}-tdlambda={}-epdec_{}={}k".format(
+                          "rnn_dim={}-2bs={}_{}-epdec_{}={}k".format(
                               args.rnn_hidden_dim,
                               args.buffer_size,
                               args.batch_size,
-                              args.td_lambda,
                               args.epsilon_finish,
                               args.epsilon_anneal_time // 1000,
                           ))
@@ -144,7 +161,8 @@ def run(_run, _config, _log):
 
 
 def evaluate_sequential(args, runner):
-    for _ in range(args.test_nepisode):
+    n_test_runs = max(1, args.test_nepisode // runner.batch_size)
+    for _ in range(n_test_runs):
         runner.run(test_mode=True)
 
     if args.save_replay:
@@ -163,6 +181,8 @@ def run_sequential(args, logger):
     args.n_actions = env_info["n_actions"]
     args.state_shape = env_info["state_shape"]
     args.obs_shape = env_info["obs_shape"]
+    args.state_ally_feats_size = env_info["state_ally_feats_size"]
+    args.state_enemy_feats_size = env_info["state_enemy_feats_size"]
     args.accumulated_episodes = getattr(args, "accumulated_episodes", None)
 
     if args.env in ["sc2", "sc2_v2", "gfootball"]:
