@@ -8,6 +8,10 @@ from components.episode_buffer import EpisodeBatch
 from modules.mixers.nmix import Mixer
 from modules.mixers.qatten import QattenMixer
 from modules.mixers.vdn import VDNMixer
+from modules.mixers.qgroupmix import GroupMixer
+from modules.mixers.qgroupmix_atten import GroupMixerAtten
+from modules.mixers.qgattenmix import GAttenMixer
+from modules.mixers.qghypermix import GHyperMixer
 from utils.rl_utils import build_td_lambda_targets, build_q_lambda_targets
 from utils.th_utils import get_parameters_num
 
@@ -29,7 +33,7 @@ def calculate_target_q(target_mac, batch, enable_parallel_computing=False, threa
         return target_mac_out
 
 
-def calculate_n_step_td_target(target_mixer, target_max_qvals, batch, rewards, terminated, mask, gamma, td_lambda,
+def calculate_n_step_td_target(mixer, target_mixer, target_max_qvals, batch, rewards, terminated, mask, gamma, td_lambda,
                                enable_parallel_computing=False, thread_num=4, q_lambda=False, target_mac_out=None):
     if enable_parallel_computing:
         th.set_num_threads(thread_num)
@@ -38,7 +42,13 @@ def calculate_n_step_td_target(target_mixer, target_max_qvals, batch, rewards, t
         # Set target mixing net to testing mode
         target_mixer.eval()
         # Calculate n-step Q-Learning targets
-        target_max_qvals = target_mixer(target_max_qvals, batch["state"])
+        if mixer == "qgattenmix" or mixer == "qghypermix":
+            target_mixer.init_hidden(batch.batch_size * batch.max_seq_length)
+            target_max_qvals, _ = target_mixer(target_max_qvals, batch["state"], batch["obs"])
+        elif mixer == "qgroupmix-atten":
+            target_max_qvals = target_mixer(target_max_qvals, batch["state"], batch["obs"])
+        else:
+            target_max_qvals = target_mixer(target_max_qvals, batch["state"])
 
         if q_lambda:
             raise NotImplementedError
@@ -66,6 +76,14 @@ class NQLearner:
             self.mixer = VDNMixer()
         elif args.mixer == "qmix":  # 31.521K
             self.mixer = Mixer(args)
+        elif args.mixer == "qgroupmix":
+            self.mixer = GroupMixer(args)
+        elif args.mixer == "qgroupmix-atten":
+            self.mixer = GroupMixerAtten(args)
+        elif args.mixer == "qgattenmix":
+            self.mixer = GAttenMixer(args)
+        elif args.mixer == "qghypermix":
+            self.mixer = GHyperMixer(args)
         else:
             raise "mixer error"
 
@@ -146,19 +164,25 @@ class NQLearner:
             if self.args.mixer.find("qmix") != -1 and self.enable_parallel_computing:
                 targets = self.pool.apply_async(
                     calculate_n_step_td_target,
-                    (self.target_mixer, target_max_qvals, batch, rewards, terminated, mask, self.args.gamma,
+                    (self.args.mixer, self.target_mixer, target_max_qvals, batch, rewards, terminated, mask, self.args.gamma,
                      self.args.td_lambda, True, self.args.thread_num, False, None)
                 )
             else:
                 targets = calculate_n_step_td_target(
-                    self.target_mixer, target_max_qvals, batch, rewards, terminated, mask, self.args.gamma,
+                    self.args.mixer, self.target_mixer, target_max_qvals, batch, rewards, terminated, mask, self.args.gamma,
                     self.args.td_lambda
                 )
 
         # Set mixing net to training mode
         self.mixer.train()
         # Mixer
-        chosen_action_qvals = self.mixer(chosen_action_qvals, batch["state"][:, :-1])
+        if self.args.mixer == "qgattenmix" or self.args.mixer == "qghypermix":
+            self.mixer.init_hidden(batch.batch_size * (batch.max_seq_length - 1))
+            chosen_action_qvals, group_loss = self.mixer(chosen_action_qvals, batch["state"][:, :-1], batch["obs"][:, :-1])
+        elif self.args.mixer == "qgroupmix-atten":
+            chosen_action_qvals = self.mixer(chosen_action_qvals, batch["state"][:, :-1], batch["obs"][:, :-1])
+        else:
+            chosen_action_qvals = self.mixer(chosen_action_qvals, batch["state"][:, :-1])
 
         if self.args.mixer.find("qmix") != -1 and self.enable_parallel_computing:
             targets = targets.get()
@@ -173,10 +197,16 @@ class NQLearner:
         loss = masked_td_error.sum() / mask_elems
 
         # Optimise
-        self.optimiser.zero_grad()
-        loss.backward()
-        grad_norm = th.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
-        self.optimiser.step()
+        if self.args.mixer == "qgattenmix" or self.args.mixer == "qghypermix":
+            self.optimiser.zero_grad()
+            (loss + self.args.alpha * group_loss).backward()
+            grad_norm = th.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
+            self.optimiser.step()
+        else:
+            self.optimiser.zero_grad()
+            loss.backward()
+            grad_norm = th.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
+            self.optimiser.step()
 
         self.train_t += 1
         self.avg_time += (time.time() - start_time - self.avg_time) / self.train_t
@@ -193,6 +223,8 @@ class NQLearner:
                 td_error_abs = masked_td_error.abs().sum().item() / mask_elems
                 q_taken_mean = (chosen_action_qvals * mask).sum().item() / (mask_elems * self.args.n_agents)
                 target_mean = (targets * mask).sum().item() / (mask_elems * self.args.n_agents)
+            if self.args.mixer == "qgattenmix" or self.args.mixer == "qghypermix":
+                self.logger.log_stat("group_loss", group_loss.item(), t_env)
             self.logger.log_stat("loss_td", loss.item(), t_env)
             self.logger.log_stat("grad_norm", grad_norm, t_env)
             self.logger.log_stat("td_error_abs", td_error_abs, t_env)
