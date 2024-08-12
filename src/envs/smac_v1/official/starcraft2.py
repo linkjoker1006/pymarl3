@@ -374,7 +374,7 @@ class StarCraft2Env(MultiAgentEnv):
                 np.flip(
                     np.transpose(
                         np.array(
-                            list(map_info.pathing_grid.data), dtype=np.bool
+                            list(map_info.pathing_grid.data), dtype=np.bool_
                         ).reshape(self.map_x, self.map_y)
                     ),
                     axis=1,
@@ -1346,7 +1346,7 @@ class StarCraft2Env(MultiAgentEnv):
         """
         arr = np.zeros(
             (self.n_agents, self.n_agents + self.n_enemies),
-            dtype=np.bool,
+            dtype=np.bool_,
         )
 
         for agent_id in range(self.n_agents):
