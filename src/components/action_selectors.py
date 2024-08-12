@@ -144,8 +144,17 @@ class EpsilonGreedyActionSelector():
         pick_random = (random_numbers < self.epsilon).long()
         # random_actions = Categorical(avail_actions.float()).sample().long()
         random_actions = Categorical(avail_actions.cpu().float()).sample().long().to(avail_actions.device)
-
+        
         picked_actions = pick_random * random_actions + (1 - pick_random) * masked_q_values.max(dim=2)[1]
+        for i in range(random_actions.shape[0]):
+            for j in range(random_actions.shape[1]):
+                if avail_actions[i][j][picked_actions[i][j]] == 0:
+                    print("_________________________wrong_________________________")
+                    picked_actions[i][j] = masked_q_values.max(dim=2)[1][i][j]
+                    # print(i)
+                    # print(j)
+                    # print(avail_actions)
+                    # print(random_actions)
         return picked_actions
 
 
