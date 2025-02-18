@@ -69,6 +69,17 @@ class StarCraft2EnvWrapper(StarCraft2Env):
         print(medivac_ids)  # [9]
         return medivac_ids
 
+    def get_agents_types(self):
+        ally_types = []
+        for al_id, al_unit in self.agents.items():
+            if al_unit.unit_type == self.marauder_id:
+                ally_types.append("marauder")
+            elif al_unit.unit_type == self.marine_id:
+                ally_types.append("marine")
+            elif al_unit.unit_type == self.medivac_id:
+                ally_types.append("medivac")
+        return ally_types
+
     # def reward_battle(self):
     #     """Reward function when self.reward_spare==False.
     #

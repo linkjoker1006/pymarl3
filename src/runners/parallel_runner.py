@@ -5,6 +5,7 @@ from multiprocessing import Pipe, Process
 
 import numpy as np
 import time
+import copy
 
 
 # Based (very) heavily on SubprocVecEnv from OpenAI Baselines
@@ -47,6 +48,11 @@ class ParallelRunner:
         self.last_test_stats = {}
 
         self.log_train_stats_t = -100000
+        
+        # AMR统计
+        # # 每个类型的各动作次数
+        # self.action_dist = {}
+        # self.ratio_list = {}
 
     def setup(self, scheme, groups, preprocess, mac):
         if self.args.use_cuda and not self.args.cpu_inference:
@@ -111,6 +117,24 @@ class ParallelRunner:
         final_env_infos = []  # may store extra stats like battle won. this is filled in ORDER OF TERMINATION
 
         save_probs = getattr(self.args, "save_probs", False)
+        
+        # AMR统计
+        # for parent_conn in self.parent_conns:
+        #     parent_conn.send(("get_agents_types", None))
+        # for parent_conn in self.parent_conns:
+        #     types = parent_conn.recv()
+        # # 记录每个类型智能体的索引集合
+        # type_map = {}
+        # for index, value in enumerate(types):
+        #     if value not in type_map:
+        #         type_map[value] = []
+        #     if value not in self.action_dist:
+        #         self.action_dist[value] = {}
+        #         self.ratio_list[value] = []
+        #         self.action_dist[value]["attack"] = 0
+        #         self.action_dist[value]["move"] = 0
+        #     type_map[value].append(index)
+        
         while True:
             # Pass the entire batch of experiences up till now to the agents
             # Receive the actions for each agent at this timestep in a batch for each un-terminated env
@@ -122,6 +146,14 @@ class ParallelRunner:
                                                   test_mode=test_mode)
 
             cpu_actions = actions.to("cpu").numpy()
+            
+            # AMR统计
+            # for agent_type, indices in type_map.items():
+            #     for index in indices:
+            #         if cpu_actions[0][index] > 6:
+            #             self.action_dist[agent_type]["attack"] += 1
+            #         elif cpu_actions[0][index] > 1:
+            #             self.action_dist[agent_type]["move"] += 1
 
             # Update the actions taken
             actions_chosen = {
@@ -139,12 +171,6 @@ class ParallelRunner:
                     if not terminated[idx]:  # Only send the actions to the env if it hasn't terminated
                         parent_conn.send(("step", cpu_actions[action_idx]))
                     action_idx += 1  # actions is not a list over every env
-
-            # # Update envs_not_terminated
-            # envs_not_terminated = [b_idx for b_idx, termed in enumerate(terminated) if not termed]
-            # all_terminated = all(terminated)
-            # if all_terminated:
-            #     break
 
             # Post step data we will insert for the current timestep
             post_transition_data = {
@@ -185,13 +211,6 @@ class ParallelRunner:
             # Add post_transiton data into the batch
             self.batch.update(post_transition_data, bs=envs_not_terminated, ts=self.t, mark_filled=False)
 
-            # if self.args.evaluate:
-            #     assert self.batch_size == 1
-            #     move = [["北", "南", "东", "西"][action - 2] if action > 1 and action < 6 else "action-{}".format(action)
-            #             for action in cpu_actions[0]]
-            #     print(self.t, move, post_transition_data["reward"])
-            #     time.sleep(1)
-
             # Move onto the next timestep
             self.t += 1
 
@@ -227,6 +246,25 @@ class ParallelRunner:
 
         cur_returns.extend(episode_returns)
 
+        # AMR统计
+        # chunksize = 64
+        # if cur_stats['n_episodes'] % chunksize == 0 and cur_stats['n_episodes'] != 0:
+        #     print(self.action_dist)
+        #     for key, value in self.action_dist.items():
+        #         ratio = self.action_dist[key]["attack"] / self.action_dist[key]["move"]
+        #         self.ratio_list[key].append(ratio)
+        #         print(key + ": {}".format(ratio))
+        #         self.action_dist[key]["attack"] = 0
+        #         self.action_dist[key]["move"] = 0
+        # if cur_stats['n_episodes'] == self.args.test_nepisode:
+        #     print("------------data------------")
+        #     print(self.ratio_list)
+        #     print("------------result------------")
+        #     for key, value in self.ratio_list.items():
+        #         print(key)
+        #         print(np.mean(self.ratio_list[key]))
+        #         print(np.std(self.ratio_list[key]))
+        
         # test with chunksize
         # chunksize = 32
         # if cur_stats['n_episodes'] % chunksize == 0:
@@ -248,7 +286,6 @@ class ParallelRunner:
             self.log_train_stats_t = self.t_env
 
         return self.batch
-        # return clear_no_reward_sub_trajectory(self.batch)
 
     def save_replay(self):
         print("----------------------------Replay----------------------------")
@@ -269,7 +306,8 @@ class ParallelRunner:
             if k != "n_episodes":
                 self.logger.log_stat(prefix + k + "_mean", v / stats["n_episodes"], self.t_env)
         stats.clear()
-        print(self.logger.stats)
+        # test
+        # print(self.logger.stats)
 
 
 def env_worker(remote, env_fn):
@@ -312,6 +350,9 @@ def env_worker(remote, env_fn):
             remote.send(env.get_stats())
         elif cmd == "save_replay":
             remote.send(env.save_replay())
+        # AMR统计
+        # elif cmd == "get_agents_types":
+        #     remote.send(env.get_agents_types())
         else:
             raise NotImplementedError
 

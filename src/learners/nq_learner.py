@@ -42,7 +42,9 @@ def calculate_n_step_td_target(mixer, target_mixer, target_max_qvals, batch, rew
         # Set target mixing net to testing mode
         target_mixer.eval()
         # Calculate n-step Q-Learning targets
-        if mixer == "qgattenmix" or mixer == "qghypermix":
+        if mixer == "qatten":
+            target_max_qvals, _, _ = target_mixer(target_max_qvals, batch["state"])
+        elif mixer == "qgattenmix" or mixer == "qghypermix":
             target_mixer.init_hidden(batch.batch_size * batch.max_seq_length)
             target_max_qvals, _ = target_mixer(target_max_qvals, batch["state"], batch["obs"])
         elif mixer == "qgroupmix-atten":
@@ -176,7 +178,9 @@ class NQLearner:
         # Set mixing net to training mode
         self.mixer.train()
         # Mixer
-        if self.args.mixer == "qgattenmix" or self.args.mixer == "qghypermix":
+        if self.args.mixer == "qatten":
+            chosen_action_qvals, q_attend_regs, head_entropies = self.mixer(chosen_action_qvals, batch["state"][:, :-1])
+        elif self.args.mixer == "qgattenmix" or self.args.mixer == "qghypermix":
             self.mixer.init_hidden(batch.batch_size * (batch.max_seq_length - 1))
             chosen_action_qvals, group_loss = self.mixer(chosen_action_qvals, batch["state"][:, :-1], batch["obs"][:, :-1])
         elif self.args.mixer == "qgroupmix-atten":
@@ -195,18 +199,18 @@ class NQLearner:
 
         mask_elems = mask.sum()
         loss = masked_td_error.sum() / mask_elems
-
-        # Optimise
-        if self.args.mixer == "qgattenmix" or self.args.mixer == "qghypermix":
-            self.optimiser.zero_grad()
-            (loss + self.args.alpha * group_loss).backward()
-            grad_norm = th.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
-            self.optimiser.step()
+         
+        if self.args.mixer == "qatten":
+            mix_loss = loss + q_attend_regs
+        elif self.args.mixer == "qgattenmix" or self.args.mixer == "qghypermix":
+            mix_loss = loss + self.args.alpha * group_loss
         else:
-            self.optimiser.zero_grad()
-            loss.backward()
-            grad_norm = th.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
-            self.optimiser.step()
+            mix_loss = loss
+        # Optimise
+        self.optimiser.zero_grad()
+        mix_loss.backward()
+        grad_norm = th.nn.utils.clip_grad_norm_(self.params, self.args.grad_norm_clip)
+        self.optimiser.step()
 
         self.train_t += 1
         self.avg_time += (time.time() - start_time - self.avg_time) / self.train_t
@@ -230,6 +234,8 @@ class NQLearner:
             self.logger.log_stat("td_error_abs", td_error_abs, t_env)
             self.logger.log_stat("q_taken_mean", q_taken_mean, t_env)
             self.logger.log_stat("target_mean", target_mean, t_env)
+            if self.args.mixer == 'qatten':
+                [self.logger.log_stat('head_{}_entropy'.format(h_i), ent.item(), t_env) for h_i, ent in enumerate(head_entropies)]
             self.log_stats_t = t_env
 
     def _update_targets(self):

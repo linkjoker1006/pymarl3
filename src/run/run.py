@@ -41,7 +41,7 @@ def run(_run, _config, _log):
     args.unique_token = unique_token
 
     testing_algorithms = ["hpn_qgroupmix", "hpn_qgroupmix_atten", "hpn_qghypermix", "hpn_qgattenmix",
-                          "vdn", "qmix", "hpn_vdn", "hpn_qmix",
+                          "vdn", "qmix", "hpn_vdn", "hpn_qmix", "qatten",
                           "deepset_vdn", "deepset_qmix", "deepset_hyper_vdn", "deepset_hyper_qmix",
                           "updet_vdn", "updet_qmix", "vdn_DA", "qmix_DA",
                           "gnn_vdn", "gnn_qmix", "qplex", "hpn_qplex", "asn",
@@ -81,7 +81,7 @@ def run(_run, _config, _log):
                                       args.gnn_layer_num,
                                       args.td_lambda,
                                   ))
-        elif args.name in ["vdn", "qmix", "deepset_vdn", "deepset_qmix", "qplex", "asn"]:
+        elif args.name in ["vdn", "qmix", "qatten", "deepset_vdn", "deepset_qmix", "qplex", "asn"]:
             logdir = os.path.join(logdir,
                                   "mixer={}-tdlambda={}".format(
                                       args.mixer,

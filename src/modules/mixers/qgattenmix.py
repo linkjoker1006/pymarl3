@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.manifold import TSNE
 from utils.th_utils import orthogonal_init_
 
 class HyperLayers(nn.Module):
@@ -76,11 +77,11 @@ class GAttenMixer(nn.Module):
         self.input_dim = self.state_dim = int(np.prod(args.state_shape))
         self.obs_dim = args.obs_shape
         self.n_heads = args.n_heads
-        
+
         assert self.n_groups > 0, "n_groups needs to be greater than zero"
-        
+
         self.hidden_states = None
-        
+
         self.abs = abs
         self.qmix_pos_func = getattr(self.args, "qmix_pos_func", "abs")
         assert self.qmix_pos_func == "abs"
@@ -100,7 +101,7 @@ class GAttenMixer(nn.Module):
         self.embedding_b1 = nn.Sequential(nn.Linear(self.input_dim, self.hypernet_embed),
                                           nn.ReLU(inplace=True),
                                           nn.Linear(self.hypernet_embed, self.n_agents * self.embed_dim))
-        
+
         self.rnn = nn.GRUCell(self.embed_dim, self.rnn_hidden_dim)
         
         self.embedding_w2 = nn.Sequential(nn.Linear(self.input_dim, self.hypernet_embed),
@@ -158,6 +159,34 @@ class GAttenMixer(nn.Module):
         # 计算loss
         group_embeddings = []
 
+        # plot tsne
+        # labels = np.zeros((b ,t, a))
+        # for i in range(self.n_groups):
+        #     labels[masks[i].cpu().detach().numpy() == 1] = i
+
+        # samples_per_batch = 5
+        # tsne_data = np.empty((b, samples_per_batch, a, self.embed_dim))  # 创建一个空 ndarray 用于存储采样结果
+        # tsne_label = np.empty((b, samples_per_batch, a))
+
+        # for i in range(b):
+        #     indices = np.random.choice(t, samples_per_batch, replace=False)  # 在每个 batch 中随机选择 5 个索引
+        #     tsne_data[i] = ally_embedding.cpu().detach().numpy()[i][indices]  # 根据索引提取样本
+        #     tsne_label[i] = labels[i][indices]
+        # tsne_data = tsne_data.reshape(b * samples_per_batch * a, self.embed_dim)
+        # tsne_label = tsne_label.reshape(b * samples_per_batch * a)
+        # tsne = TSNE(n_components=2, perplexity=50)
+        # reduced_data = tsne.fit_transform(tsne_data)
+        
+        # plt.figure(figsize=(8, 6))
+        # plt.scatter(reduced_data[:, 0], reduced_data[:, 1], c=tsne_label, cmap='viridis', marker='o')
+        # plt.title('t-SNE Visualization')
+        # plt.xlabel('t-SNE Component 1')
+        # plt.ylabel('t-SNE Component 2')
+        # plt.grid()
+        # plt.savefig(f'./tsne_test.png')
+        # print("plot tsne")
+        # assert False
+        
         for i in range(self.n_groups):
             group_embedding = ally_embedding * masks[i].unsqueeze(-1)  # (b, t, n_agents, emb)
             group_embeddings.append(group_embedding)
@@ -197,13 +226,13 @@ class GAttenMixer(nn.Module):
         group_qvals = []
         attend_mag_regs = []
         head_entropies = []
-        
-        # # 绘制并保存热度图
+
+        # plot atten
         # fig, axs = plt.subplots(1, 2, figsize=(12, 8))
         # # 定义单色 colormap 列表
         # colormaps = ['red', 'green', 'blue']
         # plot_datas = []
-        
+
         for i, group in enumerate(self.groups):
             masked_qvals = (qvals * masks[i]).reshape(b * t, 1, self.n_agents)
             if self.n_groups == 1:
@@ -259,7 +288,7 @@ class GAttenMixer(nn.Module):
                 else:
                     y = th.stack(head_qs).sum(dim=0)  # y: (b*t, 1)
 
-            # plot
+            # plot atten
             # all_head_weights = th.stack(head_attend_weights).reshape(self.n_heads, b, t, self.n_agents)  # (h, b, t, n)
             # if self.args.weighted_head:
             #     weight_heads = w_head.reshape(b, t, self.n_heads).permute(2, 0, 1).unsqueeze(-1)  #(h, b, t, 1)
@@ -283,7 +312,7 @@ class GAttenMixer(nn.Module):
         hidden = F.elu(th.matmul(group_qvals, w1) + b1) # (b*t, 1, emb)
         qtot = th.matmul(hidden, w2) + b2 # (b*t, 1, 1)
 
-        # # plot
+        # plot atten
         # health = ally_states[0, :, :, 0].cpu().detach().numpy()
         # end = t
         # for i in range(t):
